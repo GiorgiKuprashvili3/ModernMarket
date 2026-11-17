@@ -1,0 +1,20 @@
+node_modules/
+dist/
+.angular/
+coverage/
+*.log
+
+# environment and secrets
+.env
+.env.*
+!.env.example
+
+# local data
+infrastructure/docker/data/
+infrastructure/backups/*.sql*
+uploads-local/
+
+# editor / OS
+.idea/
+.vscode/
+.DS_Store
