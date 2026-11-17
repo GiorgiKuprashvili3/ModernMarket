@@ -39,7 +39,7 @@ npm start                       # http://localhost:4200, /api proxied to :3000
 
 ```
 backend/          NestJS API, Prisma schema and migrations
-frontend/         Angular app (coming next)
+frontend/         Angular app (standalone, Signals, ka/en)
 infrastructure/   Docker and deployment files (deployment deferred)
 documentation/    architecture, database, API, business rules
 ```
