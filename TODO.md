@@ -11,6 +11,8 @@
 - [ ] GitHub Actions CI (lint, test, build).
 - [ ] Spike: Georgian FULLTEXT search behavior; Georgian font in PDF generation.
 
+- [ ] M2 remaining: email worker (and clear sensitive payloads after sending), seller application API, profile/address API, admin permission guard, e2e auth tests, set `trust proxy` behind Nginx so rate limits see real client IPs, Redis-backed throttler store.
+
 ## Later milestones
 
 - M2 Auth, users, RBAC, seller applications, outbox + email queue

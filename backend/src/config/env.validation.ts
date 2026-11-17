@@ -30,6 +30,15 @@ export class EnvironmentVariables {
   @IsNotEmpty()
   JWT_ACCESS_SECRET: string;
 
+  // Kept as a string on purpose: implicit conversion would turn the text "false" into boolean true.
+  @IsIn(['true', 'false'])
+  COOKIE_SECURE: string = 'false';
+
+  // Base URL of the frontend, used to build links in emails (verify email, reset password).
+  @IsString()
+  @IsNotEmpty()
+  APP_BASE_URL: string = 'http://localhost:4200';
+
   @IsInt()
   @Min(60)
   JWT_ACCESS_TTL_SECONDS: number = 900;

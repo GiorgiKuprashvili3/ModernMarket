@@ -1,6 +1,6 @@
 # Development Status
 
-Last updated: 2026-11-16 (step 6)
+Last updated: 2026-11-16 (step 7)
 
 ## Current milestone
 
@@ -20,6 +20,17 @@ Milestone 1: Architecture and foundation (hosting/deployment work deferred by de
 - Draft raw-SQL constraints (CHECKs, FULLTEXT, append-only and frozen-invoice triggers) in backend/prisma/sql/post_schema_constraints.sql, not yet applied.
 - Seed script for roles, permissions and default platform settings.
 - Angular skeleton (hand-written, unbuilt): standalone components, Signals, lazy routes, SCSS design tokens, public layout shell, signal-based Georgian/English translation service with a unit spec, dev proxy to the API.
+
+## Milestone 2 (started): authentication
+
+Written, not yet compiled or run (no package-install access):
+- Register (enumeration-resistant), login (Argon2id, lockout after 5 failures, constant-time dummy verify for unknown emails), refresh-token rotation with family reuse detection and a 10-second concurrency grace, logout, email verification, forgot/reset password (resetting revokes all sessions), `GET /auth/me`.
+- Access token (15 min JWT, public uuid only) is returned in the body; refresh token only in an HttpOnly, SameSite=Strict cookie scoped to `/api/v1/auth`; refresh/logout also require a custom header and an allowed Origin.
+- Global guards: throttling, JWT auth (everything private unless `@Public()`), roles (`@Roles()`).
+- Audit service; emails are queued to `email_outbox` (no worker yet, so no emails are actually sent).
+- Unit specs for password hashing, token hashing and the login/refresh logic (mocked database).
+
+Still to do for M2: email worker, seller application endpoints, user profile/address endpoints, permissions guard for admins, admin 2FA decision, e2e tests against a real database.
 
 ## Not yet done in Milestone 1
 
