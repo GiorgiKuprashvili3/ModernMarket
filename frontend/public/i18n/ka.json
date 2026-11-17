@@ -1,0 +1,17 @@
+{
+  "app.name": "Modernmarket",
+  "nav.home": "მთავარი",
+  "nav.categories": "კატეგორიები",
+  "nav.wishlist": "ფავორიტები",
+  "nav.cart": "კალათა",
+  "nav.account": "ანგარიში",
+  "nav.sell": "გაყიდე Modernmarket-ზე",
+  "search.placeholder": "მოძებნე პროდუქტი, გამყიდველი, ბრენდი",
+  "language.ka": "ქართული",
+  "language.en": "English",
+  "currency.label": "ვალუტა",
+  "home.welcome": "კეთილი იყოს შენი მობრძანება Modernmarket-ზე",
+  "home.tagline": "დამოუკიდებელი გამყიდველების ქართული მარკეტფლეისი.",
+  "footer.rights": "© {year} Modernmarket. ყველა უფლება დაცულია.",
+  "notice.approx_currency": "USD და EUR თანხები სავარაუდოა. შეკვეთა იხდება ლარში (GEL)."
+}

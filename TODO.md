@@ -3,7 +3,8 @@
 ## Next (Milestone 1)
 
 - [ ] Install backend dependencies; run `prisma validate`, generate first migration, build, run health e2e test.
-- [ ] Angular skeleton (standalone, Signals, lazy routes, SCSS, i18n scaffolding ka/en).
+- [ ] Install frontend dependencies; run `ng build` and `ng test` to verify the Angular skeleton.
+- [ ] Frontend: currency display service, HTTP client + auth interceptor (Milestone 2).
 - [ ] Remaining Prisma models: catalog, inventory, shopping, orders, finance, communication, special categories, platform extras.
 - [ ] Raw-SQL migration for append-only triggers on audit_logs, ledger and history tables.
 - [ ] ER diagram and `documentation/database/`.

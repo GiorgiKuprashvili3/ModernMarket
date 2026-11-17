@@ -1,0 +1,17 @@
+{
+  "app.name": "Modernmarket",
+  "nav.home": "Home",
+  "nav.categories": "Categories",
+  "nav.wishlist": "Wishlist",
+  "nav.cart": "Cart",
+  "nav.account": "Account",
+  "nav.sell": "Sell on Modernmarket",
+  "search.placeholder": "Search products, sellers, brands",
+  "language.ka": "ქართული",
+  "language.en": "English",
+  "currency.label": "Currency",
+  "home.welcome": "Welcome to Modernmarket",
+  "home.tagline": "Georgia's marketplace for independent sellers.",
+  "footer.rights": "© {year} Modernmarket. All rights reserved.",
+  "notice.approx_currency": "USD and EUR values are approximate. Orders are charged in GEL."
+}

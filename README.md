@@ -27,7 +27,13 @@ npm run start:dev               # API on http://localhost:3000/api/v1
 - Swagger (development only): `http://localhost:3000/api/v1/docs`
 - Health: `GET /api/v1/health/live`, `GET /api/v1/health/ready`
 
-The frontend (Angular) is added in a following step and will run on `http://localhost:4200`.
+Frontend:
+
+```bash
+cd frontend
+npm install
+npm start                       # http://localhost:4200, /api proxied to :3000
+```
 
 ## Repository layout
 

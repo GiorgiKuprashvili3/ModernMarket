@@ -1,0 +1,71 @@
+// Modernmarket design tokens: deep charcoal, warm white, neutral gray, one accent.
+:root {
+  --mm-charcoal: #1f2123;
+  --mm-charcoal-soft: #2c2f33;
+  --mm-warm-white: #faf8f5;
+  --mm-surface: #ffffff;
+  --mm-gray-100: #f1efec;
+  --mm-gray-300: #d9d6d1;
+  --mm-gray-500: #8a8782;
+  --mm-gray-700: #54524e;
+  --mm-accent: #a8844f; // muted brass
+  --mm-accent-strong: #8c6b3a;
+  --mm-danger: #b3392f;
+  --mm-success: #2f7a52;
+
+  --mm-font-body: 'Inter', 'Noto Sans Georgian', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mm-font-display: 'Playfair Display', 'Noto Sans Georgian', Georgia, serif;
+
+  --mm-radius: 4px;
+  --mm-shadow: 0 1px 2px rgb(0 0 0 / 6%), 0 4px 12px rgb(0 0 0 / 5%);
+  --mm-space-1: 4px;
+  --mm-space-2: 8px;
+  --mm-space-3: 16px;
+  --mm-space-4: 24px;
+  --mm-space-5: 40px;
+  --mm-container: 1240px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--mm-font-body);
+  font-size: 16px;
+  line-height: 1.55;
+  color: var(--mm-charcoal);
+  background: var(--mm-warm-white);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3 {
+  font-family: var(--mm-font-display);
+  font-weight: 500;
+  line-height: 1.2;
+  margin: 0 0 var(--mm-space-3);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.mm-container {
+  max-width: var(--mm-container);
+  margin: 0 auto;
+  padding: 0 var(--mm-space-3);
+}
+
+:focus-visible {
+  outline: 2px solid var(--mm-accent);
+  outline-offset: 2px;
+}
