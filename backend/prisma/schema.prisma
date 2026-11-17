@@ -235,6 +235,12 @@ model SellerProfile {
   store        SellerStore?
   products     Product[]
   sellerOrders SellerOrder[]
+  commissionRules CommissionRule[]
+  ledgerEntries SellerCommissionLedger[]
+  balance      SellerBalance?
+  invoices     SellerInvoice[]
+  subscriptions SellerSubscription[]
+  promotions   Promotion[]
 
   @@index([status])
   @@map("seller_profiles")
@@ -516,6 +522,7 @@ model Category {
 
   parent        Category?               @relation("CategoryTree", fields: [parentId], references: [id], onDelete: Restrict)
   children      Category[]              @relation("CategoryTree")
+  commissionRules CommissionRule[]
   translations  CategoryTranslation[]
   products      Product[]
   attributes    AttributeDefinition[]
@@ -597,6 +604,7 @@ model Product {
   wishlistItems  WishlistItem[]
   comparisonItems ComparisonItem[]
   recentlyViewed RecentlyViewed[]
+  promotions     Promotion[]
 
   @@index([status, categoryId, publishedAt])
   @@index([sellerProfileId, status])
@@ -1039,6 +1047,7 @@ model SellerOrder {
   payment     PaymentRecord?
   refunds     Refund[]
   disputes    Dispute[]
+  ledgerEntries SellerCommissionLedger[]
 
   @@index([sellerProfileId, status, createdAt])
   @@index([orderId])
@@ -1068,6 +1077,7 @@ model OrderItem {
   product     Product        @relation(fields: [productId], references: [id], onDelete: Restrict)
   variant     ProductVariant @relation(fields: [variantId], references: [id], onDelete: Restrict)
   refunds     Refund[]
+  ledgerEntries SellerCommissionLedger[]
 
   @@index([sellerOrderId])
   @@index([productId])
@@ -1205,4 +1215,352 @@ model DisputeMessage {
 
   @@index([disputeId, createdAt])
   @@map("dispute_messages")
+}
+
+// ================================================================ Part 4: finance
+//
+// Everything here is GEL. Ledger, invoice payments and revenue entries are append-only (enforced by
+// triggers in the raw-SQL migration). Corrections are new rows, never edits. Issued invoices are
+// frozen; later corrections become reversal/adjustment ledger entries or credit notes.
+
+enum CommissionRuleScope {
+  GLOBAL
+  CATEGORY
+  SELLER
+  PROMOTIONAL
+}
+
+enum LedgerEntryType {
+  ACCRUAL
+  REVERSAL
+  ADJUSTMENT
+}
+
+enum InvoiceType {
+  COMMISSION
+  LISTING_FEE
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+enum SubscriptionStatus {
+  PENDING_PAYMENT
+  ACTIVE
+  EXPIRED
+  CANCELLED
+}
+
+enum PromotionPlacement {
+  FEATURED
+  HOMEPAGE
+  CATEGORY
+  SEARCH
+}
+
+enum PromotionStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  ACTIVE
+  EXPIRED
+  CANCELLED
+}
+
+enum PaymentConfirmation {
+  UNPAID
+  PAID
+}
+
+enum RevenueSource {
+  COMMISSION
+  SUBSCRIPTION
+  PROMOTION
+  LISTING_FEE
+}
+
+// Priority resolution (highest wins): PROMOTIONAL > SELLER > CATEGORY > plan override > GLOBAL.
+model CommissionRule {
+  id              BigInt              @id @default(autoincrement())
+  scope           CommissionRuleScope
+  categoryId      BigInt?             @map("category_id")
+  sellerProfileId BigInt?             @map("seller_profile_id")
+  ratePercent     Decimal             @map("rate_percent") @db.Decimal(5, 2)
+  validFrom       DateTime            @map("valid_from")
+  validTo         DateTime?           @map("valid_to")
+  priority        Int                 @default(0)
+  note            String?             @db.VarChar(500)
+  createdById     BigInt?             @map("created_by_id")
+  createdAt       DateTime            @default(now()) @map("created_at")
+
+  category Category?      @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  seller   SellerProfile? @relation(fields: [sellerProfileId], references: [id], onDelete: Restrict)
+
+  @@index([scope, validFrom, validTo])
+  @@index([categoryId])
+  @@index([sellerProfileId])
+  @@map("commission_rules")
+}
+
+// Append-only. Idempotency: one accrual per order item (and correction sequence).
+model SellerCommissionLedger {
+  id                     BigInt          @id @default(autoincrement())
+  sellerProfileId        BigInt          @map("seller_profile_id")
+  sellerOrderId          BigInt?         @map("seller_order_id")
+  orderItemId            BigInt?         @map("order_item_id")
+  entryType              LedgerEntryType @map("entry_type")
+  // Increments for each correction against the same order item so the unique key stays meaningful.
+  correctionSeq          Int             @default(0) @map("correction_seq")
+  grossEligibleAmountGel Decimal         @map("gross_eligible_amount_gel") @db.Decimal(12, 2)
+  commissionPercent      Decimal         @map("commission_percent") @db.Decimal(5, 2)
+  // Signed: accruals positive, reversals negative, adjustments either.
+  commissionAmountGel    Decimal         @map("commission_amount_gel") @db.Decimal(12, 2)
+  reversesEntryId        BigInt?         @map("reverses_entry_id")
+  reason                 String?         @db.VarChar(1000)
+  createdById            BigInt?         @map("created_by_id")
+  // 'YYYY-MM' in Asia/Tbilisi time; decides which monthly invoice picks the entry up.
+  periodMonth            String          @map("period_month") @db.Char(7)
+  createdAt              DateTime        @default(now()) @map("created_at")
+
+  seller      SellerProfile @relation(fields: [sellerProfileId], references: [id], onDelete: Restrict)
+  sellerOrder SellerOrder?  @relation(fields: [sellerOrderId], references: [id], onDelete: Restrict)
+  orderItem   OrderItem?    @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+  invoiceItem SellerInvoiceItem?
+
+  @@unique([orderItemId, entryType, correctionSeq])
+  @@index([sellerProfileId, periodMonth])
+  @@index([sellerOrderId])
+  @@map("seller_commission_ledger")
+}
+
+// A cache recomputed from the ledger and invoices; never the source of truth.
+// A nightly reconciliation job compares it with a fresh calculation.
+model SellerBalance {
+  id                    BigInt   @id @default(autoincrement())
+  sellerProfileId       BigInt   @unique @map("seller_profile_id")
+  accruedUninvoicedGel  Decimal  @default(0) @map("accrued_uninvoiced_gel") @db.Decimal(14, 2)
+  invoicedOutstandingGel Decimal @default(0) @map("invoiced_outstanding_gel") @db.Decimal(14, 2)
+  overdueGel            Decimal  @default(0) @map("overdue_gel") @db.Decimal(14, 2)
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  seller SellerProfile @relation(fields: [sellerProfileId], references: [id], onDelete: Cascade)
+
+  @@map("seller_balances")
+}
+
+// Gapless invoice numbers: this row is locked (SELECT ... FOR UPDATE) when issuing an invoice.
+model InvoiceCounter {
+  year       Int @id
+  lastNumber Int @default(0) @map("last_number")
+
+  @@map("invoice_counters")
+}
+
+model SellerInvoice {
+  id              BigInt        @id @default(autoincrement())
+  uuid            String        @unique @default(uuid()) @db.Char(36)
+  sellerProfileId BigInt        @map("seller_profile_id")
+  invoiceType     InvoiceType   @default(COMMISSION) @map("invoice_type")
+  // Assigned at issue time, e.g. MM-2026-000123. Null while DRAFT.
+  invoiceNumber   String?       @unique @map("invoice_number") @db.VarChar(32)
+  // Billing period in Asia/Tbilisi time, stored as dates.
+  periodStart     DateTime      @map("period_start") @db.Date
+  periodEnd       DateTime      @map("period_end") @db.Date
+  status          InvoiceStatus @default(DRAFT)
+  issueDate       DateTime?     @map("issue_date") @db.Date
+  dueDate         DateTime?     @map("due_date") @db.Date
+  grossEligibleSalesGel Decimal @default(0) @map("gross_eligible_sales_gel") @db.Decimal(14, 2)
+  subtotalGel     Decimal       @default(0) @map("subtotal_gel") @db.Decimal(14, 2)
+  adjustmentsGel  Decimal       @default(0) @map("adjustments_gel") @db.Decimal(14, 2)
+  // Only used if Modernmarket is VAT-registered (business decision pending).
+  vatGel          Decimal?      @map("vat_gel") @db.Decimal(14, 2)
+  totalGel        Decimal       @default(0) @map("total_gel") @db.Decimal(14, 2)
+  paidGel         Decimal       @default(0) @map("paid_gel") @db.Decimal(14, 2)
+  // Key in the PRIVATE bucket for the generated PDF.
+  pdfKey          String?       @map("pdf_key") @db.VarChar(255)
+  issuedById      BigInt?       @map("issued_by_id")
+  issuedAt        DateTime?     @map("issued_at")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  seller      SellerProfile          @relation(fields: [sellerProfileId], references: [id], onDelete: Restrict)
+  items       SellerInvoiceItem[]
+  payments    SellerInvoicePayment[]
+  creditNotes CreditNote[]
+
+  // Makes monthly generation idempotent: re-running cannot create a second invoice for the period.
+  @@unique([sellerProfileId, periodStart, periodEnd, invoiceType])
+  @@index([status, dueDate])
+  @@map("seller_invoices")
+}
+
+model SellerInvoiceItem {
+  id            BigInt   @id @default(autoincrement())
+  invoiceId     BigInt   @map("invoice_id")
+  // A ledger entry can appear on exactly one invoice. Null for non-ledger lines (e.g. listing fees).
+  ledgerEntryId BigInt?  @unique @map("ledger_entry_id")
+  description   String   @db.VarChar(500)
+  grossGel      Decimal? @map("gross_gel") @db.Decimal(12, 2)
+  amountGel     Decimal  @map("amount_gel") @db.Decimal(12, 2)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  invoice     SellerInvoice           @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  ledgerEntry SellerCommissionLedger? @relation(fields: [ledgerEntryId], references: [id], onDelete: Restrict)
+
+  @@index([invoiceId])
+  @@map("seller_invoice_items")
+}
+
+// Append-only. A mistaken payment is corrected with a negative row.
+model SellerInvoicePayment {
+  id            BigInt   @id @default(autoincrement())
+  invoiceId     BigInt   @map("invoice_id")
+  amountGel     Decimal  @map("amount_gel") @db.Decimal(12, 2)
+  paidAt        DateTime @map("paid_at")
+  reference     String?  @db.VarChar(150)
+  evidenceKey   String?  @map("evidence_key") @db.VarChar(255)
+  note          String?  @db.VarChar(500)
+  recordedById  BigInt   @map("recorded_by_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  invoice SellerInvoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+
+  @@index([invoiceId])
+  @@map("seller_invoice_payments")
+}
+
+// Corrections to an already issued invoice, without rewriting it.
+model CreditNote {
+  id          BigInt   @id @default(autoincrement())
+  uuid        String   @unique @default(uuid()) @db.Char(36)
+  invoiceId   BigInt   @map("invoice_id")
+  amountGel   Decimal  @map("amount_gel") @db.Decimal(12, 2)
+  reason      String   @db.VarChar(1000)
+  issuedById  BigInt   @map("issued_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  invoice SellerInvoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+
+  @@index([invoiceId])
+  @@map("credit_notes")
+}
+
+model SubscriptionPlan {
+  id                  BigInt   @id @default(autoincrement())
+  key                 String   @unique @db.VarChar(64)
+  nameKa              String   @map("name_ka") @db.VarChar(100)
+  nameEn              String   @map("name_en") @db.VarChar(100)
+  monthlyPriceGel     Decimal  @map("monthly_price_gel") @db.Decimal(10, 2)
+  maxActiveProducts   Int?     @map("max_active_products")
+  promotionAllowance  Int      @default(0) @map("promotion_allowance")
+  commissionPercentOverride Decimal? @map("commission_percent_override") @db.Decimal(5, 2)
+  features            Json?
+  isActive            Boolean  @default(true) @map("is_active")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  subscriptions SellerSubscription[]
+
+  @@map("subscription_plans")
+}
+
+// No automatic billing: an admin confirms a manual payment, which activates the subscription.
+model SellerSubscription {
+  id              BigInt             @id @default(autoincrement())
+  sellerProfileId BigInt             @map("seller_profile_id")
+  planId          BigInt             @map("plan_id")
+  status          SubscriptionStatus @default(PENDING_PAYMENT)
+  startsAt        DateTime?          @map("starts_at")
+  expiresAt       DateTime?          @map("expires_at")
+  createdAt       DateTime           @default(now()) @map("created_at")
+  updatedAt       DateTime           @updatedAt @map("updated_at")
+
+  seller   SellerProfile        @relation(fields: [sellerProfileId], references: [id], onDelete: Restrict)
+  plan     SubscriptionPlan     @relation(fields: [planId], references: [id], onDelete: Restrict)
+  payments SubscriptionPayment[]
+
+  @@index([sellerProfileId, status])
+  @@index([status, expiresAt])
+  @@map("seller_subscriptions")
+}
+
+// Append-only.
+model SubscriptionPayment {
+  id             BigInt   @id @default(autoincrement())
+  subscriptionId BigInt   @map("subscription_id")
+  amountGel      Decimal  @map("amount_gel") @db.Decimal(10, 2)
+  paidAt         DateTime @map("paid_at")
+  reference      String?  @db.VarChar(150)
+  recordedById   BigInt    @map("recorded_by_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  subscription SellerSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+
+  @@index([subscriptionId])
+  @@map("subscription_payments")
+}
+
+model PromotionType {
+  id             BigInt             @id @default(autoincrement())
+  key            String             @unique @db.VarChar(64)
+  placement      PromotionPlacement
+  nameKa         String             @map("name_ka") @db.VarChar(100)
+  nameEn         String             @map("name_en") @db.VarChar(100)
+  pricePerDayGel Decimal            @map("price_per_day_gel") @db.Decimal(10, 2)
+  maxSlots       Int                @map("max_slots")
+  isActive       Boolean            @default(true) @map("is_active")
+
+  promotions Promotion[]
+
+  @@map("promotion_types")
+}
+
+model Promotion {
+  id              BigInt              @id @default(autoincrement())
+  uuid            String              @unique @default(uuid()) @db.Char(36)
+  sellerProfileId BigInt              @map("seller_profile_id")
+  productId       BigInt              @map("product_id")
+  typeId          BigInt              @map("type_id")
+  // Category placements only: which category page the product is promoted on.
+  categoryId      BigInt?             @map("category_id")
+  status          PromotionStatus     @default(REQUESTED)
+  startsAt        DateTime            @map("starts_at")
+  endsAt          DateTime            @map("ends_at")
+  priceGel        Decimal             @map("price_gel") @db.Decimal(10, 2)
+  paymentStatus   PaymentConfirmation @default(UNPAID) @map("payment_status")
+  decidedById     BigInt?             @map("decided_by_id")
+  rejectionReason String?             @map("rejection_reason") @db.VarChar(500)
+  createdAt       DateTime            @default(now()) @map("created_at")
+  updatedAt       DateTime            @updatedAt @map("updated_at")
+
+  seller   SellerProfile @relation(fields: [sellerProfileId], references: [id], onDelete: Restrict)
+  product  Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  type     PromotionType @relation(fields: [typeId], references: [id], onDelete: Restrict)
+
+  @@index([status, startsAt, endsAt])
+  @@index([sellerProfileId])
+  @@index([productId])
+  @@map("promotions")
+}
+
+// Append-only. Gives analytics a clean, separate record of platform revenue by source.
+// Buyer COD collections are never recorded here: they are the seller's money.
+model PlatformRevenueEntry {
+  id            BigInt        @id @default(autoincrement())
+  source        RevenueSource
+  amountGel     Decimal       @map("amount_gel") @db.Decimal(14, 2)
+  referenceType String        @map("reference_type") @db.VarChar(64)
+  referenceId   String        @map("reference_id") @db.VarChar(64)
+  recognizedAt  DateTime      @map("recognized_at")
+  createdAt     DateTime      @default(now()) @map("created_at")
+
+  @@unique([source, referenceType, referenceId])
+  @@index([source, recognizedAt])
+  @@map("platform_revenue_entries")
 }

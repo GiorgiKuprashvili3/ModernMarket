@@ -9,8 +9,8 @@ Schema source of truth: `backend/prisma/schema.prisma`. Status of each part is t
 | 1 | identity, auth tokens, profiles, addresses, seller applications/documents, audit log, outbox, platform settings, idempotency keys | written, unvalidated |
 | 2 | seller stores, categories, brands, products, variants, images, attributes, moderation history, vehicle details, digital files, inventory and inventory movements | written, unvalidated |
 | 3 | shopping (cart, wishlist, comparison, recently viewed), orders, seller orders, order items, status histories, delivery arrangements, COD payment records, refunds, disputes | written, unvalidated |
-| 4 | finance (commission rules, ledger, balances, invoices, payments, credit notes, subscriptions, promotions, revenue entries) | planned | (next)
-| 5 | reviews, messaging, notifications, vehicle inquiries, digital download permissions, exchange rates, newsletter, search history | planned |
+| 4 | finance (commission rules, ledger, balances, invoice counter, invoices, invoice items/payments, credit notes, subscription plans/subscriptions/payments, promotion types/promotions, platform revenue entries) | written, unvalidated |
+| 5 | reviews, messaging, notifications, vehicle inquiries, digital download permissions, exchange rates, newsletter, search history | next |
 
 ## Decisions made while modelling (differ slightly from the architecture draft)
 
@@ -28,3 +28,5 @@ Prisma cannot express these, so they are added by a hand-written migration:
 - `CHECK (rating BETWEEN 1 AND 5)` on reviews (later part).
 - `BEFORE UPDATE`/`BEFORE DELETE` triggers raising an error on append-only tables.
 - `CHECK` that a product of kind VEHICLE has no variants is enforced in the service layer (cross-table), with a test.
+5. **No `promotional_listings` slot table.** Slot availability for a placement is checked by counting overlapping approved/active promotions against `promotion_types.max_slots` inside a transaction. Add a slot table only if per-slot ordering becomes a requirement.
+6. **Ledger idempotency** is `UNIQUE(order_item_id, entry_type, correction_seq)`; invoice idempotency is `UNIQUE(seller_profile_id, period_start, period_end, invoice_type)`; a ledger entry can sit on only one invoice (`seller_invoice_items.ledger_entry_id` unique).
