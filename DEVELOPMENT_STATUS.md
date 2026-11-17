@@ -1,6 +1,6 @@
 # Development Status
 
-Last updated: 2026-11-16 (step 7)
+Last updated: 2026-11-16 (step 8)
 
 ## Current milestone
 
@@ -30,7 +30,14 @@ Written, not yet compiled or run (no package-install access):
 - Audit service; emails are queued to `email_outbox` (no worker yet, so no emails are actually sent).
 - Unit specs for password hashing, token hashing and the login/refresh logic (mocked database).
 
-Still to do for M2: email worker, seller application endpoints, user profile/address endpoints, permissions guard for admins, admin 2FA decision, e2e tests against a real database.
+Also written (step 8, same caveat: unbuilt, untested against a real database):
+- Email worker: polls `email_outbox` every 5 s, leases rows, retries with exponential backoff (max 5), clears payloads (one-time links) after sending or final failure. Only a `console` transport exists (development); a real SMTP/provider transport is NOT implemented and production refuses to start with `console`.
+- Plain-text ka/en templates for verify-email, reset-password, account-exists and the seller-application emails.
+- Seller applications: applicant endpoints (`POST /seller-applications`, `GET /seller-applications/me`; requires verified email; rejected applicants can re-apply as a new revision) and admin endpoints (`list`, `detail`, `review`, `approve`, `reject`) behind role + `sellers.read` / `sellers.approve` permissions. Approval grants the `seller` role and creates the store with a transliterated slug. Identification numbers are AES-256-GCM encrypted; every admin view of one is audited. The seller role appears in the token at the next refresh.
+- Permissions guard (reads permissions from the database per request so revocation is immediate), AES-GCM crypto service, slug utility with Georgian transliteration, env validation spec.
+- Seller document upload is NOT implemented (needs the storage/uploads work in M3).
+
+Still to do for M2: user profile/address endpoints, admin 2FA decision, e2e tests against a real database, document uploads.
 
 ## Not yet done in Milestone 1
 

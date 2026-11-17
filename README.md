@@ -14,7 +14,7 @@ Hosting and deployment configuration are intentionally deferred.
 ## Development setup
 
 ```bash
-cp .env.example .env            # then edit the secrets
+cp .env.example .env            # then edit the secrets (set DATA_ENCRYPTION_KEY with: openssl rand -base64 32)
 docker compose up -d            # MySQL 8 + Redis, bound to localhost only
 
 cd backend

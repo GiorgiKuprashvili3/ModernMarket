@@ -39,6 +39,20 @@ export class EnvironmentVariables {
   @IsNotEmpty()
   APP_BASE_URL: string = 'http://localhost:4200';
 
+  // 32 random bytes, base64 (e.g. `openssl rand -base64 32`). Encrypts sensitive fields such as
+  // seller identification numbers. Losing this key makes those values unrecoverable.
+  @IsString()
+  @IsNotEmpty()
+  DATA_ENCRYPTION_KEY: string;
+
+  // Set to 'false' to run the API without background workers (e.g. email sending).
+  @IsIn(['true', 'false'])
+  WORKERS_ENABLED: string = 'true';
+
+  @IsString()
+  @IsOptional()
+  MAIL_TRANSPORT?: string;
+
   @IsInt()
   @Min(60)
   JWT_ACCESS_TTL_SECONDS: number = 900;
@@ -58,6 +72,9 @@ export function validateEnv(config: Record<string, unknown>): EnvironmentVariabl
       .map((e) => `${e.property}: ${Object.values(e.constraints ?? {}).join(', ')}`)
       .join('; ');
     throw new Error(`Invalid environment configuration: ${details}`);
+  }
+  if (Buffer.from(validated.DATA_ENCRYPTION_KEY, 'base64').length !== 32) {
+    throw new Error('Invalid environment configuration: DATA_ENCRYPTION_KEY must be 32 bytes, base64-encoded');
   }
   if (validated.NODE_ENV === 'production' && validated.JWT_ACCESS_SECRET.length < 32) {
     throw new Error('JWT_ACCESS_SECRET must be at least 32 characters in production');
