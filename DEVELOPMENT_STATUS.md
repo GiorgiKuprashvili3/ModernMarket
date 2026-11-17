@@ -1,6 +1,6 @@
 # Development Status
 
-Last updated: 2026-11-16 (step 5)
+Last updated: 2026-11-16 (step 6)
 
 ## Current milestone
 
@@ -16,13 +16,15 @@ Milestone 1: Architecture and foundation (hosting/deployment work deferred by de
 - Prisma schema part 2: seller stores, categories (nested), brands, products, variants, images, attributes, moderation history, vehicle details, digital files, inventory and movements. See documentation/database/README.md.
 - Prisma schema part 3: cart, wishlist, comparison, recently viewed, orders (parent + per-seller), order items with price/commission snapshots, status histories, delivery arrangements, COD payment records, refunds, disputes.
 - Prisma schema part 4: commission rules, append-only commission ledger, balance cache, invoice counter, invoices/items/payments, credit notes, subscription plans/subscriptions/payments, promotion types/promotions, platform revenue entries.
+- Prisma schema part 5 (schema now has 84 models): reviews, messaging, notifications, email outbox, vehicle inquiries, digital download permissions (with PENDING_RELEASE for COD digital goods), exchange rates, newsletter, search, home sections, legal documents, consents.
+- Draft raw-SQL constraints (CHECKs, FULLTEXT, append-only and frozen-invoice triggers) in backend/prisma/sql/post_schema_constraints.sql, not yet applied.
 - Seed script for roles, permissions and default platform settings.
 - Angular skeleton (hand-written, unbuilt): standalone components, Signals, lazy routes, SCSS design tokens, public layout shell, signal-based Georgian/English translation service with a unit spec, dev proxy to the API.
 
 ## Not yet done in Milestone 1
 
 - Dependencies not installed and nothing built or tested yet: the development session used so far had no package-install access. **All code so far is unverified**: it has not been compiled, `prisma validate` has not been run, and no migration has been generated.
-- Remaining Prisma models: communication and platform extras (part 5).
+- Schema is fully drafted; needs validation and first migration.
 - First migration, ER diagram file, database documentation.
 - CI workflow.
 

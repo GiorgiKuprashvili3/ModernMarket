@@ -10,7 +10,7 @@ Schema source of truth: `backend/prisma/schema.prisma`. Status of each part is t
 | 2 | seller stores, categories, brands, products, variants, images, attributes, moderation history, vehicle details, digital files, inventory and inventory movements | written, unvalidated |
 | 3 | shopping (cart, wishlist, comparison, recently viewed), orders, seller orders, order items, status histories, delivery arrangements, COD payment records, refunds, disputes | written, unvalidated |
 | 4 | finance (commission rules, ledger, balances, invoice counter, invoices, invoice items/payments, credit notes, subscription plans/subscriptions/payments, promotion types/promotions, platform revenue entries) | written, unvalidated |
-| 5 | reviews, messaging, notifications, vehicle inquiries, digital download permissions, exchange rates, newsletter, search history | next |
+| 5 | reviews (+images, reports), conversations/participants/messages/reports, notifications and preferences, email outbox, vehicle inquiries, digital download permissions and log, exchange rates and history, newsletter, search history and stats, home sections, legal documents, user consents | written, unvalidated |
 
 ## Decisions made while modelling (differ slightly from the architecture draft)
 

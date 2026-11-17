@@ -91,6 +91,14 @@ model User {
   wishlist               Wishlist?
   comparison             Comparison?
   orders                 Order[]
+  reviews                Review[]
+  notifications          Notification[]
+  notificationPreferences NotificationPreference[]
+  conversationParticipants ConversationParticipant[]
+  messagesSent           Message[]
+  vehicleInquiries       VehicleInquiry[]
+  downloadPermissions    DigitalDownloadPermission[]
+  consents               UserConsent[]
 
   @@map("users")
 }
@@ -241,6 +249,7 @@ model SellerProfile {
   invoices     SellerInvoice[]
   subscriptions SellerSubscription[]
   promotions   Promotion[]
+  vehicleInquiries VehicleInquiry[]
 
   @@index([status])
   @@map("seller_profiles")
@@ -605,6 +614,9 @@ model Product {
   comparisonItems ComparisonItem[]
   recentlyViewed RecentlyViewed[]
   promotions     Promotion[]
+  reviews        Review[]
+  vehicleInquiries VehicleInquiry[]
+  conversations  Conversation[]
 
   @@index([status, categoryId, publishedAt])
   @@index([sellerProfileId, status])
@@ -766,6 +778,7 @@ model DigitalProductFile {
   createdAt  DateTime @default(now()) @map("created_at")
 
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  permissions DigitalDownloadPermission[]
 
   @@index([productId])
   @@map("digital_product_files")
@@ -1048,6 +1061,7 @@ model SellerOrder {
   refunds     Refund[]
   disputes    Dispute[]
   ledgerEntries SellerCommissionLedger[]
+  conversations Conversation[]
 
   @@index([sellerProfileId, status, createdAt])
   @@index([orderId])
@@ -1078,6 +1092,8 @@ model OrderItem {
   variant     ProductVariant @relation(fields: [variantId], references: [id], onDelete: Restrict)
   refunds     Refund[]
   ledgerEntries SellerCommissionLedger[]
+  review        Review?
+  downloadPermissions DigitalDownloadPermission[]
 
   @@index([sellerOrderId])
   @@index([productId])
@@ -1563,4 +1579,399 @@ model PlatformRevenueEntry {
   @@unique([source, referenceType, referenceId])
   @@index([source, recognizedAt])
   @@map("platform_revenue_entries")
+}
+
+// ================================================================ Part 5: reviews, messaging, notifications,
+// vehicle inquiries, digital downloads, currency, and remaining platform tables
+
+enum ReviewStatus {
+  PENDING
+  PUBLISHED
+  HIDDEN
+}
+
+enum ReportStatus {
+  OPEN
+  DISMISSED
+  ACTIONED
+}
+
+enum ConversationType {
+  PRODUCT
+  ORDER
+  VEHICLE_INQUIRY
+  SUPPORT
+}
+
+enum EmailStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+enum InquiryStatus {
+  NEW
+  CONTACTED
+  CLOSED
+}
+
+enum DownloadPermissionStatus {
+  // Digital products paid by COD: access is held until the seller confirms payment.
+  PENDING_RELEASE
+  ACTIVE
+  REVOKED
+  EXPIRED
+}
+
+// ---------------------------------------------------------------- Reviews
+
+// One review per purchased order item, which is how duplicates and non-purchase reviews are prevented.
+// CHECK (rating BETWEEN 1 AND 5) is added in the raw-SQL migration.
+model Review {
+  id                BigInt       @id @default(autoincrement())
+  uuid              String       @unique @default(uuid()) @db.Char(36)
+  productId         BigInt       @map("product_id")
+  orderItemId       BigInt       @unique @map("order_item_id")
+  buyerId           BigInt       @map("buyer_id")
+  rating            Int
+  body              String?      @db.Text
+  status            ReviewStatus @default(PENDING)
+  isVerifiedPurchase Boolean     @default(true) @map("is_verified_purchase")
+  sellerResponse    String?      @map("seller_response") @db.Text
+  sellerRespondedAt DateTime?    @map("seller_responded_at")
+  moderatedById     BigInt?      @map("moderated_by_id")
+  moderationNote    String?      @map("moderation_note") @db.VarChar(500)
+  createdAt         DateTime     @default(now()) @map("created_at")
+  updatedAt         DateTime     @updatedAt @map("updated_at")
+
+  product   Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  orderItem OrderItem      @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+  buyer     User           @relation(fields: [buyerId], references: [id], onDelete: Restrict)
+  images    ReviewImage[]
+  reports   ReviewReport[]
+
+  @@index([productId, status, createdAt])
+  @@index([buyerId])
+  @@map("reviews")
+}
+
+model ReviewImage {
+  id         BigInt   @id @default(autoincrement())
+  reviewId   BigInt   @map("review_id")
+  storageKey String   @map("storage_key") @db.VarChar(255)
+  sortOrder  Int      @default(0) @map("sort_order")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  review Review @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  @@index([reviewId])
+  @@map("review_images")
+}
+
+model ReviewReport {
+  id         BigInt       @id @default(autoincrement())
+  reviewId   BigInt       @map("review_id")
+  reporterId BigInt       @map("reporter_id")
+  reason     String       @db.VarChar(500)
+  status     ReportStatus @default(OPEN)
+  createdAt  DateTime     @default(now()) @map("created_at")
+
+  review Review @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  @@unique([reviewId, reporterId])
+  @@index([status])
+  @@map("review_reports")
+}
+
+// ---------------------------------------------------------------- Messaging
+
+model Conversation {
+  id            BigInt           @id @default(autoincrement())
+  uuid          String           @unique @default(uuid()) @db.Char(36)
+  type          ConversationType
+  productId     BigInt?          @map("product_id")
+  sellerOrderId BigInt?          @map("seller_order_id")
+  lastMessageAt DateTime?        @map("last_message_at")
+  createdAt     DateTime         @default(now()) @map("created_at")
+
+  product        Product?                  @relation(fields: [productId], references: [id], onDelete: SetNull)
+  sellerOrder    SellerOrder?              @relation(fields: [sellerOrderId], references: [id], onDelete: SetNull)
+  participants   ConversationParticipant[]
+  messages       Message[]
+  vehicleInquiry VehicleInquiry?
+
+  @@index([productId])
+  @@index([sellerOrderId])
+  @@map("conversations")
+}
+
+// Access to a conversation is checked against this table on every read and write.
+model ConversationParticipant {
+  id                BigInt   @id @default(autoincrement())
+  conversationId    BigInt   @map("conversation_id")
+  userId            BigInt   @map("user_id")
+  lastReadMessageId BigInt?  @map("last_read_message_id")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+  @@map("conversation_participants")
+}
+
+model Message {
+  id             BigInt   @id @default(autoincrement())
+  conversationId BigInt   @map("conversation_id")
+  senderId       BigInt   @map("sender_id")
+  body           String   @db.Text
+  attachments    Json?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  conversation Conversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User            @relation(fields: [senderId], references: [id], onDelete: Restrict)
+  reports      MessageReport[]
+
+  @@index([conversationId, id])
+  @@map("messages")
+}
+
+model MessageReport {
+  id         BigInt       @id @default(autoincrement())
+  messageId  BigInt       @map("message_id")
+  reporterId BigInt       @map("reporter_id")
+  reason     String       @db.VarChar(500)
+  status     ReportStatus @default(OPEN)
+  createdAt  DateTime     @default(now()) @map("created_at")
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, reporterId])
+  @@index([status])
+  @@map("message_reports")
+}
+
+// ---------------------------------------------------------------- Notifications and email
+
+model Notification {
+  id        BigInt    @id @default(autoincrement())
+  userId    BigInt    @map("user_id")
+  type      String    @db.VarChar(64)
+  payload   Json
+  readAt    DateTime? @map("read_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt])
+  @@map("notifications")
+}
+
+model NotificationPreference {
+  id     BigInt  @id @default(autoincrement())
+  userId BigInt  @map("user_id")
+  type   String  @db.VarChar(64)
+  inApp  Boolean @default(true) @map("in_app")
+  email  Boolean @default(true)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, type])
+  @@map("notification_preferences")
+}
+
+// Emails are queued here (or in the job queue) and retried; a failure never blocks an order.
+model EmailOutbox {
+  id            BigInt      @id @default(autoincrement())
+  toEmail       String      @map("to_email") @db.VarChar(255)
+  template      String      @db.VarChar(100)
+  locale        Locale      @default(ka)
+  payload       Json
+  status        EmailStatus @default(PENDING)
+  attempts      Int         @default(0)
+  lastError     String?     @map("last_error") @db.Text
+  nextAttemptAt DateTime    @default(now()) @map("next_attempt_at")
+  sentAt        DateTime?   @map("sent_at")
+  createdAt     DateTime    @default(now()) @map("created_at")
+
+  @@index([status, nextAttemptAt])
+  @@map("email_outbox")
+}
+
+// ---------------------------------------------------------------- Vehicle inquiries
+
+model VehicleInquiry {
+  id               BigInt        @id @default(autoincrement())
+  uuid             String        @unique @default(uuid()) @db.Char(36)
+  productId        BigInt        @map("product_id")
+  buyerId          BigInt        @map("buyer_id")
+  sellerProfileId  BigInt        @map("seller_profile_id")
+  message          String        @db.VarChar(2000)
+  contactPhone     String?       @map("contact_phone") @db.VarChar(32)
+  status           InquiryStatus @default(NEW)
+  conversationId   BigInt?       @unique @map("conversation_id")
+  createdAt        DateTime      @default(now()) @map("created_at")
+
+  product      Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  buyer        User           @relation(fields: [buyerId], references: [id], onDelete: Restrict)
+  seller       SellerProfile  @relation(fields: [sellerProfileId], references: [id], onDelete: Restrict)
+  conversation Conversation?  @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  @@index([sellerProfileId, status, createdAt])
+  @@index([buyerId, createdAt])
+  @@index([productId])
+  @@map("vehicle_inquiries")
+}
+
+// ---------------------------------------------------------------- Digital downloads
+
+// Files are never exposed by URL; each download passes through an authorized endpoint that checks
+// status, expiry and download count here.
+model DigitalDownloadPermission {
+  id            BigInt                   @id @default(autoincrement())
+  uuid          String                   @unique @default(uuid()) @db.Char(36)
+  orderItemId   BigInt                   @map("order_item_id")
+  buyerId       BigInt                   @map("buyer_id")
+  fileId        BigInt                   @map("file_id")
+  status        DownloadPermissionStatus @default(PENDING_RELEASE)
+  maxDownloads  Int                      @default(5) @map("max_downloads")
+  downloadCount Int                      @default(0) @map("download_count")
+  expiresAt     DateTime?                @map("expires_at")
+  releasedById  BigInt?                  @map("released_by_id")
+  grantedAt     DateTime?                @map("granted_at")
+  revokedAt     DateTime?                @map("revoked_at")
+  createdAt     DateTime                 @default(now()) @map("created_at")
+
+  orderItem OrderItem          @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+  buyer     User               @relation(fields: [buyerId], references: [id], onDelete: Restrict)
+  file      DigitalProductFile @relation(fields: [fileId], references: [id], onDelete: Restrict)
+  log       DigitalDownloadLog[]
+
+  @@unique([orderItemId, fileId])
+  @@index([buyerId, status])
+  @@map("digital_download_permissions")
+}
+
+// Append-only.
+model DigitalDownloadLog {
+  id           BigInt   @id @default(autoincrement())
+  permissionId BigInt   @map("permission_id")
+  ip           String?  @db.VarChar(45)
+  userAgent    String?  @map("user_agent") @db.VarChar(255)
+  downloadedAt DateTime @default(now()) @map("downloaded_at")
+
+  permission DigitalDownloadPermission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@index([permissionId, downloadedAt])
+  @@map("digital_download_log")
+}
+
+// ---------------------------------------------------------------- Currency (display only)
+
+// GEL is the only transaction currency. These rates exist only to render approximate USD/EUR values.
+// ratePerGel = units of the foreign currency per 1 GEL.
+model ExchangeRate {
+  id          BigInt          @id @default(autoincrement())
+  currency    DisplayCurrency @unique
+  ratePerGel  Decimal         @map("rate_per_gel") @db.Decimal(14, 8)
+  source      String          @db.VarChar(64)
+  updatedById BigInt?         @map("updated_by_id")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+
+  @@map("exchange_rates")
+}
+
+// Append-only.
+model ExchangeRateHistory {
+  id          BigInt          @id @default(autoincrement())
+  currency    DisplayCurrency
+  ratePerGel  Decimal         @map("rate_per_gel") @db.Decimal(14, 8)
+  source      String          @db.VarChar(64)
+  changedById BigInt?         @map("changed_by_id")
+  createdAt   DateTime        @default(now()) @map("created_at")
+
+  @@index([currency, createdAt])
+  @@map("exchange_rate_history")
+}
+
+// ---------------------------------------------------------------- Remaining platform tables
+
+model NewsletterSubscription {
+  id             BigInt    @id @default(autoincrement())
+  email          String    @unique @db.VarChar(255)
+  locale         Locale    @default(ka)
+  confirmToken   String?   @unique @map("confirm_token") @db.Char(64)
+  confirmedAt    DateTime? @map("confirmed_at")
+  unsubscribedAt DateTime? @map("unsubscribed_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  @@map("newsletter_subscriptions")
+}
+
+model SearchHistory {
+  id          BigInt   @id @default(autoincrement())
+  userId      BigInt?  @map("user_id")
+  anonymousId String?  @map("anonymous_id") @db.Char(36)
+  term        String   @db.VarChar(200)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([userId, createdAt])
+  @@index([anonymousId, createdAt])
+  @@map("search_history")
+}
+
+// Aggregated popular searches, updated in batches.
+model SearchTermStat {
+  id             BigInt   @id @default(autoincrement())
+  term           String   @unique @db.VarChar(200)
+  count          Int      @default(1)
+  lastSearchedAt DateTime @map("last_searched_at")
+
+  @@index([count])
+  @@map("search_term_stats")
+}
+
+// Admin-configurable homepage sections (hero, trending, new arrivals, ...), loaded from the backend.
+model HomeSection {
+  id        BigInt   @id @default(autoincrement())
+  key       String   @unique @db.VarChar(64)
+  type      String   @db.VarChar(64)
+  config    Json
+  sortOrder Int      @default(0) @map("sort_order")
+  isEnabled Boolean  @default(true) @map("is_enabled")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([isEnabled, sortOrder])
+  @@map("home_sections")
+}
+
+// Versioned legal text (terms, privacy policy, seller agreement). Content is a business/legal input.
+model LegalDocument {
+  id          BigInt    @id @default(autoincrement())
+  key         String    @db.VarChar(64)
+  version     Int
+  locale      Locale
+  title       String    @db.VarChar(255)
+  body        String    @db.LongText
+  publishedAt DateTime? @map("published_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@unique([key, version, locale])
+  @@map("legal_documents")
+}
+
+// Records which document version a user accepted and when.
+model UserConsent {
+  id          BigInt   @id @default(autoincrement())
+  userId      BigInt   @map("user_id")
+  documentKey String   @map("document_key") @db.VarChar(64)
+  version     Int
+  acceptedAt  DateTime @default(now()) @map("accepted_at")
+  ip          String?  @db.VarChar(45)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, documentKey, version])
+  @@map("user_consents")
 }
