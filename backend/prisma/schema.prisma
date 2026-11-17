@@ -87,6 +87,10 @@ model User {
   sellerProfile          SellerProfile?
   addresses              Address[]
   auditLogs              AuditLog[]
+  cart                   Cart?
+  wishlist               Wishlist?
+  comparison             Comparison?
+  orders                 Order[]
 
   @@map("users")
 }
@@ -230,6 +234,7 @@ model SellerProfile {
   applications SellerApplication[]
   store        SellerStore?
   products     Product[]
+  sellerOrders SellerOrder[]
 
   @@index([status])
   @@map("seller_profiles")
@@ -588,6 +593,10 @@ model Product {
   moderation    ProductModerationHistory[]
   vehicle       VehicleDetails?
   digitalFiles  DigitalProductFile[]
+  orderItems     OrderItem[]
+  wishlistItems  WishlistItem[]
+  comparisonItems ComparisonItem[]
+  recentlyViewed RecentlyViewed[]
 
   @@index([status, categoryId, publishedAt])
   @@index([sellerProfileId, status])
@@ -630,6 +639,8 @@ model ProductVariant {
   product   Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
   inventory Inventory?
   images    ProductImage[]
+  cartItems CartItem[]
+  orderItems OrderItem[]
 
   // SKU is unique within a product; cross-product uniqueness per seller is enforced in the service.
   @@unique([productId, sku])
@@ -788,4 +799,410 @@ model InventoryMovement {
   @@index([inventoryId, createdAt])
   @@index([referenceType, referenceId])
   @@map("inventory_movements")
+}
+
+// ================================================================ Part 3: shopping, orders, COD payments
+//
+// Orders are snapshots: titles, SKUs, option values, unit prices and the applied commission rate are
+// copied at placement and never recomputed. Order status and payment status are separate state
+// machines (payment_records is not a column on seller_orders). Status history tables are append-only.
+
+enum ParentOrderStatus {
+  PLACED
+  IN_PROGRESS
+  PARTIALLY_COMPLETED
+  COMPLETED
+  CANCELLED
+}
+
+enum SellerOrderStatus {
+  PENDING
+  ACCEPTED
+  PROCESSING
+  READY_FOR_DISPATCH
+  DISPATCHED
+  DELIVERED
+  COMPLETED
+  CANCELLED
+  REJECTED
+  DISPUTED
+}
+
+enum CommissionStatus {
+  NOT_ELIGIBLE
+  ELIGIBLE
+  RECOGNIZED
+  REVERSED
+}
+
+enum OrderItemStatus {
+  ACTIVE
+  CANCELLED
+  REFUNDED
+}
+
+enum DeliveryMethod {
+  SELLER_DELIVERY
+  BUYER_PICKUP
+  COURIER_ARRANGED
+}
+
+enum PaymentMethod {
+  COD
+}
+
+enum PaymentStatus {
+  AWAITING_COLLECTION
+  COLLECTED_BY_SELLER
+  NOT_COLLECTED
+  PAYMENT_DISPUTED
+  PARTIALLY_REFUNDED
+  REFUNDED
+}
+
+enum RefundStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  RECORDED
+}
+
+enum DisputeType {
+  NON_DELIVERY
+  NOT_AS_DESCRIBED
+  PAYMENT_DISAGREEMENT
+  OTHER
+}
+
+enum DisputeStatus {
+  OPEN
+  INVESTIGATING
+  RESOLVED_FOR_BUYER
+  RESOLVED_FOR_SELLER
+  CLOSED
+}
+
+// ---------------------------------------------------------------- Shopping
+
+model Cart {
+  id        BigInt   @id @default(autoincrement())
+  userId    BigInt   @unique @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user  User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items CartItem[]
+
+  @@map("carts")
+}
+
+// Holds references and quantity only. Prices are always read from the variant, never stored here.
+model CartItem {
+  id        BigInt   @id @default(autoincrement())
+  cartId    BigInt   @map("cart_id")
+  variantId BigInt   @map("variant_id")
+  quantity  Int
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  cart    Cart           @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  variant ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@unique([cartId, variantId])
+  @@map("cart_items")
+}
+
+model Wishlist {
+  id         BigInt   @id @default(autoincrement())
+  userId     BigInt   @unique @map("user_id")
+  // Set only when the buyer chooses to share; revocable by clearing it.
+  shareToken String?  @unique @map("share_token") @db.Char(32)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user  User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items WishlistItem[]
+
+  @@map("wishlists")
+}
+
+model WishlistItem {
+  id         BigInt   @id @default(autoincrement())
+  wishlistId BigInt   @map("wishlist_id")
+  productId  BigInt   @map("product_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  wishlist Wishlist @relation(fields: [wishlistId], references: [id], onDelete: Cascade)
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([wishlistId, productId])
+  @@map("wishlist_items")
+}
+
+model Comparison {
+  id        BigInt   @id @default(autoincrement())
+  userId    BigInt   @unique @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user  User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items ComparisonItem[]
+
+  @@map("comparisons")
+}
+
+model ComparisonItem {
+  id           BigInt   @id @default(autoincrement())
+  comparisonId BigInt   @map("comparison_id")
+  productId    BigInt   @map("product_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  comparison Comparison @relation(fields: [comparisonId], references: [id], onDelete: Cascade)
+  product    Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([comparisonId, productId])
+  @@map("comparison_items")
+}
+
+// Either userId (signed in) or anonymousId (guest cookie id) is set; pruned to the latest N per owner.
+model RecentlyViewed {
+  id          BigInt   @id @default(autoincrement())
+  userId      BigInt?  @map("user_id")
+  anonymousId String?  @map("anonymous_id") @db.Char(36)
+  productId   BigInt   @map("product_id")
+  viewedAt    DateTime @default(now()) @map("viewed_at")
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([userId, viewedAt])
+  @@index([anonymousId, viewedAt])
+  @@map("recently_viewed")
+}
+
+// ---------------------------------------------------------------- Orders
+
+// Parent checkout record shown to the buyer as one consolidated order.
+// Its status is derived from the seller orders and recomputed whenever one changes.
+model Order {
+  id               BigInt            @id @default(autoincrement())
+  uuid             String            @unique @default(uuid()) @db.Char(36)
+  orderNumber      String            @unique @map("order_number") @db.VarChar(32)
+  buyerId          BigInt            @map("buyer_id")
+  idempotencyKey   String            @map("idempotency_key") @db.VarChar(128)
+  contactName      String            @map("contact_name") @db.VarChar(150)
+  contactPhone     String            @map("contact_phone") @db.VarChar(32)
+  contactEmail     String            @map("contact_email") @db.VarChar(255)
+  // Address (or pickup choice) copied at placement so later edits never change history.
+  shippingSnapshot Json              @map("shipping_snapshot")
+  totalGel         Decimal           @map("total_gel") @db.Decimal(12, 2)
+  status           ParentOrderStatus @default(PLACED)
+  placedAt         DateTime          @default(now()) @map("placed_at")
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+
+  buyer        User          @relation(fields: [buyerId], references: [id], onDelete: Restrict)
+  sellerOrders SellerOrder[]
+
+  @@unique([buyerId, idempotencyKey])
+  @@index([buyerId, placedAt])
+  @@map("orders")
+}
+
+// One per seller per checkout. Sellers only ever see and manage their own seller orders.
+model SellerOrder {
+  id                BigInt            @id @default(autoincrement())
+  uuid              String            @unique @default(uuid()) @db.Char(36)
+  orderId           BigInt            @map("order_id")
+  sellerProfileId   BigInt            @map("seller_profile_id")
+  sellerOrderNumber String            @unique @map("seller_order_number") @db.VarChar(40)
+  status            SellerOrderStatus @default(PENDING)
+  subtotalGel       Decimal           @map("subtotal_gel") @db.Decimal(12, 2)
+  discountGel       Decimal           @default(0) @map("discount_gel") @db.Decimal(12, 2)
+  totalGel          Decimal           @map("total_gel") @db.Decimal(12, 2)
+  commissionStatus  CommissionStatus  @default(NOT_ELIGIBLE) @map("commission_status")
+  buyerNote         String?           @map("buyer_note") @db.VarChar(1000)
+  // Unanswered orders auto-cancel at this time; delivered orders auto-complete at autoCompleteAt.
+  autoCancelAt      DateTime?         @map("auto_cancel_at")
+  autoCompleteAt    DateTime?         @map("auto_complete_at")
+  acceptedAt        DateTime?         @map("accepted_at")
+  dispatchedAt      DateTime?         @map("dispatched_at")
+  deliveredAt       DateTime?         @map("delivered_at")
+  completedAt       DateTime?         @map("completed_at")
+  cancelledAt       DateTime?         @map("cancelled_at")
+  cancellationReason String?          @map("cancellation_reason") @db.VarChar(500)
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+
+  order       Order                @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  seller      SellerProfile        @relation(fields: [sellerProfileId], references: [id], onDelete: Restrict)
+  items       OrderItem[]
+  history     OrderStatusHistory[]
+  delivery    DeliveryArrangement?
+  payment     PaymentRecord?
+  refunds     Refund[]
+  disputes    Dispute[]
+
+  @@index([sellerProfileId, status, createdAt])
+  @@index([orderId])
+  @@index([status, autoCancelAt])
+  @@index([status, autoCompleteAt])
+  @@map("seller_orders")
+}
+
+model OrderItem {
+  id                       BigInt          @id @default(autoincrement())
+  sellerOrderId            BigInt          @map("seller_order_id")
+  productId                BigInt          @map("product_id")
+  variantId                BigInt          @map("variant_id")
+  kind                     ProductKind
+  titleSnapshot            String          @map("title_snapshot") @db.VarChar(255)
+  skuSnapshot              String          @map("sku_snapshot") @db.VarChar(100)
+  optionsSnapshot          Json?           @map("options_snapshot")
+  unitPriceGel             Decimal         @map("unit_price_gel") @db.Decimal(12, 2)
+  quantity                 Int
+  lineTotalGel             Decimal         @map("line_total_gel") @db.Decimal(12, 2)
+  // Commission rate resolved at placement and frozen here; the ledger uses this value.
+  appliedCommissionPercent Decimal         @map("applied_commission_percent") @db.Decimal(5, 2)
+  status                   OrderItemStatus @default(ACTIVE)
+  createdAt                DateTime        @default(now()) @map("created_at")
+
+  sellerOrder SellerOrder    @relation(fields: [sellerOrderId], references: [id], onDelete: Restrict)
+  product     Product        @relation(fields: [productId], references: [id], onDelete: Restrict)
+  variant     ProductVariant @relation(fields: [variantId], references: [id], onDelete: Restrict)
+  refunds     Refund[]
+
+  @@index([sellerOrderId])
+  @@index([productId])
+  @@index([variantId])
+  @@map("order_items")
+}
+
+// Append-only.
+model OrderStatusHistory {
+  id            BigInt             @id @default(autoincrement())
+  sellerOrderId BigInt             @map("seller_order_id")
+  fromStatus    SellerOrderStatus? @map("from_status")
+  toStatus      SellerOrderStatus  @map("to_status")
+  actorId       BigInt?            @map("actor_id")
+  // buyer, seller, admin or system (scheduled jobs).
+  actorRole     String             @map("actor_role") @db.VarChar(32)
+  reason        String?            @db.VarChar(500)
+  createdAt     DateTime           @default(now()) @map("created_at")
+
+  sellerOrder SellerOrder @relation(fields: [sellerOrderId], references: [id], onDelete: Cascade)
+
+  @@index([sellerOrderId, createdAt])
+  @@map("order_status_history")
+}
+
+// Delivery is arranged between buyer and seller; the platform only records what they agreed.
+model DeliveryArrangement {
+  id                BigInt         @id @default(autoincrement())
+  sellerOrderId     BigInt         @unique @map("seller_order_id")
+  method            DeliveryMethod
+  notes             String?        @db.VarChar(1000)
+  agreedAt          DateTime?      @map("agreed_at")
+  trackingReference String?        @map("tracking_reference") @db.VarChar(100)
+  updatedAt         DateTime       @updatedAt @map("updated_at")
+
+  sellerOrder SellerOrder @relation(fields: [sellerOrderId], references: [id], onDelete: Cascade)
+
+  @@map("delivery_arrangements")
+}
+
+// Cash on delivery: the buyer pays the seller directly; the platform only records the claim and
+// the confirmations. Status is independent of the order status.
+model PaymentRecord {
+  id                  BigInt        @id @default(autoincrement())
+  sellerOrderId       BigInt        @unique @map("seller_order_id")
+  method              PaymentMethod @default(COD)
+  status              PaymentStatus @default(AWAITING_COLLECTION)
+  amountExpectedGel   Decimal       @map("amount_expected_gel") @db.Decimal(12, 2)
+  amountCollectedGel  Decimal?      @map("amount_collected_gel") @db.Decimal(12, 2)
+  collectedAt         DateTime?     @map("collected_at")
+  recordedById        BigInt?       @map("recorded_by_id")
+  buyerConfirmedAt    DateTime?     @map("buyer_confirmed_at")
+  note                String?       @db.VarChar(500)
+  createdAt           DateTime      @default(now()) @map("created_at")
+  updatedAt           DateTime      @updatedAt @map("updated_at")
+
+  sellerOrder SellerOrder          @relation(fields: [sellerOrderId], references: [id], onDelete: Restrict)
+  history     PaymentStatusHistory[]
+
+  @@index([status])
+  @@map("payment_records")
+}
+
+// Append-only.
+model PaymentStatusHistory {
+  id              BigInt        @id @default(autoincrement())
+  paymentRecordId BigInt        @map("payment_record_id")
+  fromStatus      PaymentStatus? @map("from_status")
+  toStatus        PaymentStatus @map("to_status")
+  actorId         BigInt?       @map("actor_id")
+  actorRole       String        @map("actor_role") @db.VarChar(32)
+  reason          String?       @db.VarChar(500)
+  createdAt       DateTime      @default(now()) @map("created_at")
+
+  paymentRecord PaymentRecord @relation(fields: [paymentRecordId], references: [id], onDelete: Cascade)
+
+  @@index([paymentRecordId, createdAt])
+  @@map("payment_status_history")
+}
+
+// Refunds are recorded by the platform but money moves directly between seller and buyer.
+model Refund {
+  id            BigInt       @id @default(autoincrement())
+  uuid          String       @unique @default(uuid()) @db.Char(36)
+  sellerOrderId BigInt       @map("seller_order_id")
+  orderItemId   BigInt?      @map("order_item_id")
+  amountGel     Decimal      @map("amount_gel") @db.Decimal(12, 2)
+  reason        String       @db.VarChar(1000)
+  status        RefundStatus @default(REQUESTED)
+  requestedById BigInt       @map("requested_by_id")
+  decidedById   BigInt?      @map("decided_by_id")
+  decidedAt     DateTime?    @map("decided_at")
+  createdAt     DateTime     @default(now()) @map("created_at")
+
+  sellerOrder SellerOrder @relation(fields: [sellerOrderId], references: [id], onDelete: Restrict)
+  orderItem   OrderItem?  @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+
+  @@index([sellerOrderId])
+  @@index([status])
+  @@map("refunds")
+}
+
+model Dispute {
+  id             BigInt        @id @default(autoincrement())
+  uuid           String        @unique @default(uuid()) @db.Char(36)
+  sellerOrderId  BigInt        @map("seller_order_id")
+  openedById     BigInt        @map("opened_by_id")
+  type           DisputeType
+  status         DisputeStatus @default(OPEN)
+  description    String        @db.Text
+  resolutionNote String?       @map("resolution_note") @db.Text
+  resolvedById   BigInt?       @map("resolved_by_id")
+  resolvedAt     DateTime?     @map("resolved_at")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+
+  sellerOrder SellerOrder       @relation(fields: [sellerOrderId], references: [id], onDelete: Restrict)
+  messages    DisputeMessage[]
+
+  @@index([sellerOrderId])
+  @@index([status, createdAt])
+  @@map("disputes")
+}
+
+model DisputeMessage {
+  id          BigInt   @id @default(autoincrement())
+  disputeId   BigInt   @map("dispute_id")
+  authorId    BigInt   @map("author_id")
+  authorRole  String   @map("author_role") @db.VarChar(32)
+  body        String   @db.Text
+  attachments Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  dispute Dispute @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+
+  @@index([disputeId, createdAt])
+  @@map("dispute_messages")
 }
