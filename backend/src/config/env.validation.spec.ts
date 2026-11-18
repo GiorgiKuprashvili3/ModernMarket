@@ -1,3 +1,4 @@
+import 'reflect-metadata';
 import { randomBytes } from 'crypto';
 import { validateEnv } from './env.validation';
 

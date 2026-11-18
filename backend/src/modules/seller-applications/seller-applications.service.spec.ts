@@ -85,7 +85,7 @@ describe('SellerApplicationsService', () => {
       await service.submit('u', dto, ctx);
       const data = (prisma.sellerProfile.create.mock.calls[0][0] as { data: Record<string, unknown> }).data;
       expect(data['identificationEnc']).toBe('v1:enc');
-      expect(JSON.stringify(data)).not.toContain('01234567890');
+      expect(JSON.stringify(data, (_k, v) => (typeof v === 'bigint' ? v.toString() : v))).not.toContain('01234567890');
     });
 
     it('allows a rejected applicant to apply again as a new revision', async () => {
