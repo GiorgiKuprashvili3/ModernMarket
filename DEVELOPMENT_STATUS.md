@@ -1,5 +1,15 @@
 # Development Status
 
+## Verification status (updated 2026-11-18)
+
+GitHub Actions now runs on every push (`.github/workflows/ci.yml`). Verified as of run 44214134514 (all green):
+- Backend: dependencies install, `prisma validate`, `prisma generate`, TypeScript build, all unit tests (47), schema created on a real MySQL 8.4 (`prisma db push`), seed runs, raw-SQL constraints/triggers/FULLTEXT apply, the API boots, and a smoke test passes (health/ready, register 202, wrong-password login 401, correct login 200, `/auth/me` and an admin route without a token 401).
+- Frontend: dependencies install, development build, unit tests (headless Chrome).
+
+NOT yet verified: Prisma migrations (CI uses `db push`, no migration files exist yet), the append-only triggers actually blocking updates/deletes, FULLTEXT search on Georgian text, refresh-token rotation and role/permission checks against a real database, seller application flow end to end, emails (console transport only), production build and anything under hosting. Unit tests use mocked databases, so passing them does not prove the database code works.
+
+Found and fixed by CI so far: test-code errors (BigInt serialization, missing reflect-metadata import, missing karma reporters) and trigger creation failing under MySQL binary logging.
+
 Last updated: 2026-11-16 (step 8)
 
 ## Current milestone
@@ -23,7 +33,7 @@ Milestone 1: Architecture and foundation (hosting/deployment work deferred by de
 
 ## Milestone 2 (started): authentication
 
-Written, not yet compiled or run (no package-install access):
+Written; compiled and unit-tested in CI (see verification status above), database behavior not yet tested end to end:
 - Register (enumeration-resistant), login (Argon2id, lockout after 5 failures, constant-time dummy verify for unknown emails), refresh-token rotation with family reuse detection and a 10-second concurrency grace, logout, email verification, forgot/reset password (resetting revokes all sessions), `GET /auth/me`.
 - Access token (15 min JWT, public uuid only) is returned in the body; refresh token only in an HttpOnly, SameSite=Strict cookie scoped to `/api/v1/auth`; refresh/logout also require a custom header and an allowed Origin.
 - Global guards: throttling, JWT auth (everything private unless `@Public()`), roles (`@Roles()`).
@@ -41,7 +51,7 @@ Still to do for M2: user profile/address endpoints, admin 2FA decision, e2e test
 
 ## Not yet done in Milestone 1
 
-- Dependencies not installed and nothing built or tested yet: the development session used so far had no package-install access. **All code so far is unverified**: it has not been compiled, `prisma validate` has not been run, and no migration has been generated.
+- No migration files generated yet (CI uses `prisma db push`). Generate the first migration from a machine/CI with a database.
 - Schema is fully drafted; needs validation and first migration.
 - First migration, ER diagram file, database documentation.
 - CI workflow.

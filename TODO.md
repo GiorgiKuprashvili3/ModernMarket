@@ -2,13 +2,13 @@
 
 ## Next (Milestone 1)
 
-- [ ] Install backend dependencies; run `prisma validate`, generate first migration, build, run health e2e test.
-- [ ] Install frontend dependencies; run `ng build` and `ng test` to verify the Angular skeleton.
+- [ ] Generate the first Prisma migration and apply post_schema_constraints.sql as a second migration (CI currently uses `db push`).
+- [ ] Integration tests against a real database: trigger enforcement, token rotation, permission guard, seller application flow.
 - [ ] Frontend: currency display service, HTTP client + auth interceptor (Milestone 2).
 - [ ] Validate the full schema, generate the first migration, then apply backend/prisma/sql/post_schema_constraints.sql as a second migration.
 - [ ] Seed: categories, subscription plans, promotion types, exchange rates, home sections.
 - [ ] ER diagram and `documentation/database/`.
-- [ ] GitHub Actions CI (lint, test, build).
+- [ ] CI: add lint step.
 - [ ] Spike: Georgian FULLTEXT search behavior; Georgian font in PDF generation.
 
 - [ ] M2 remaining: real mail transport (SMTP/provider; needs nodemailer or SDK + credentials), profile/address API, seller document upload (with M3 storage), admin permission guard, e2e auth tests, set `trust proxy` behind Nginx so rate limits see real client IPs, Redis-backed throttler store.
