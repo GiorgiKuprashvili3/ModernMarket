@@ -45,6 +45,35 @@ jobs:
         run: npx prisma db push --skip-generate
       - name: Apply seed
         run: npx prisma db seed
+      - name: Apply raw-SQL constraints (CHECKs, FULLTEXT, append-only triggers)
+        run: mysql -h 127.0.0.1 -umodernmarket -pmodernmarket modernmarket < prisma/sql/post_schema_constraints.sql
+      - name: Smoke test the running API
+        env:
+          NODE_ENV: development
+          API_PORT: '3000'
+          CORS_ORIGINS: http://localhost:4200
+          JWT_ACCESS_SECRET: ci-only-secret-not-for-production
+          DATA_ENCRYPTION_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+          MAIL_TRANSPORT: console
+        run: |
+          node dist/main > api.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://localhost:3000/api/v1/health/ready && break; sleep 2; done
+          echo
+          curl -sf http://localhost:3000/api/v1/health/ready
+          echo
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:3000/api/v1/auth/register -H 'content-type: application/json' -d '{"email":"ci@example.com","password":"a-long-password-123","firstName":"Ci","lastName":"Bot","acceptTerms":true}')
+          echo "register: $code"; test "$code" = "202"
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:3000/api/v1/auth/login -H 'content-type: application/json' -d '{"email":"ci@example.com","password":"wrong-password-123"}')
+          echo "login wrong password: $code"; test "$code" = "401"
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:3000/api/v1/auth/login -H 'content-type: application/json' -d '{"email":"ci@example.com","password":"a-long-password-123"}')
+          echo "login right password: $code"; test "$code" = "200"
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/api/v1/auth/me)
+          echo "me without token: $code"; test "$code" = "401"
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/api/v1/admin/seller-applications)
+          echo "admin route without token: $code"; test "$code" = "401"
+      - name: Show API log on failure
+        if: failure()
+        run: cat api.log || true
 
   frontend:
     runs-on: ubuntu-latest
