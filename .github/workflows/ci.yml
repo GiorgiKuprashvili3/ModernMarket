@@ -46,7 +46,8 @@ jobs:
       - name: Apply seed
         run: npx prisma db seed
       - name: Apply raw-SQL constraints (CHECKs, FULLTEXT, append-only triggers)
-        run: mysql -h 127.0.0.1 -umodernmarket -pmodernmarket modernmarket < prisma/sql/post_schema_constraints.sql
+        # Triggers need SUPER (or log_bin_trust_function_creators) while binary logging is on, so use root here.
+        run: mysql -h 127.0.0.1 -uroot -proot modernmarket < prisma/sql/post_schema_constraints.sql
       - name: Smoke test the running API
         env:
           NODE_ENV: development

@@ -14,6 +14,8 @@ services:
       - --collation-server=utf8mb4_0900_ai_ci
       - --default-time-zone=+00:00
       - --innodb-ft-min-token-size=2
+      # Needed so the migration user can create the append-only triggers while binary logging is on.
+      - --log-bin-trust-function-creators=1
     ports:
       - "127.0.0.1:3306:3306"
     volumes:

@@ -3,6 +3,9 @@
 -- `prisma migrate dev --create-only --name post_schema_constraints`, paste this file into it, review
 -- against the generated table/column names, then run `prisma migrate dev`.
 -- Requires MySQL 8.0.16+ (enforced CHECK constraints).
+-- Creating triggers with binary logging on needs SUPER or `log_bin_trust_function_creators=1`
+-- (set in docker-compose.yml for local development). Production must do the same or run this
+-- migration as a privileged user.
 
 -- ---------------------------------------------------------------- CHECK constraints
 
